@@ -1,0 +1,78 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define MIN_ORDER 20
+#define MAX_ORDER 200000
+#define TILE_WIDTH 16
+
+__global__ void matmul(float* mat1, float* mat2, float* result, int order)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(row < order && col < order)
+    {
+        float sum = 0.0;
+        for(int i = 0; i < order; i++)
+        {
+            sum += mat1[row * order + i] * mat2[i * order + col];
+        }
+        result[row * order + col] = sum;
+    }
+}
+
+int main()
+{
+    clock_t start, end;
+    double cpu_time_used;
+
+    for(int order = MIN_ORDER; order <= MAX_ORDER; order *= 10)
+    {
+        float* mat1 = (float*) malloc(order*order*sizeof(float));
+        float* mat2 = (float*) malloc(order*order*sizeof(float));
+        float* result = (float*) malloc(order*order*sizeof(float));
+
+        for(int i = 0; i < order; i++)
+        {
+            for(int j = 0; j < order; j++)
+            {
+                mat1[i*order+j] = rand() % 10;
+                mat2[i*order+j] = rand() % 10;
+            }
+        }
+
+        float* d_mat1;
+        float* d_mat2;
+        float* d_result;
+
+        cudaMalloc(&d_mat1, order*order*sizeof(float));
+        cudaMalloc(&d_mat2, order*order*sizeof(float));
+        cudaMalloc(&d_result, order*order*sizeof(float));
+
+        cudaMemcpy(d_mat1, mat1, order*order*sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_mat2, mat2, order*order*sizeof(float), cudaMemcpyHostToDevice);
+
+        dim3 dimGrid(ceil(order/(float)TILE_WIDTH), ceil(order/(float)TILE_WIDTH), 1);
+        dim3 dimBlock(TILE_WIDTH, TILE_WIDTH, 1);
+
+        start = clock();
+        matmul<<<dimGrid, dimBlock>>>(d_mat1, d_mat2, d_result, order);
+        cudaDeviceSynchronize();
+        end = clock();
+
+        cudaMemcpy(result, d_result, order*order*sizeof(float), cudaMemcpyDeviceToHost);
+
+        cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+        printf("Time taken for %d x %d matrix: %f seconds\n", order, order, cpu_time_used);
+
+        free(mat1);
+        free(mat2);
+        free(result);
+        cudaFree(d_mat1);
+        cudaFree(d_mat2);
+        cudaFree(d_result);
+    }
+
+    return 0;
+}

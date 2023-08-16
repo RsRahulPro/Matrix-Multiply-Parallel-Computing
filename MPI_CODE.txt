@@ -1,0 +1,90 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <mpi.h>
+
+#define MIN_ORDER 20
+#define MAX_ORDER 200000
+
+void matmul(float mat1[], float mat2[], float result[], int order)
+{
+    for(int i = 0; i < order; i++)
+    {
+        for(int j = 0; j < order; j++)
+        {
+            result[i*order+j] = 0;
+            for(int k = 0; k < order; k++)
+            {
+                result[i*order+j] += mat1[i*order+k] * mat2[k*order+j];
+            }
+        }
+    }
+}
+
+int main(int argc, char** argv)
+{
+    int rank, size;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    clock_t start, end;
+    double cpu_time_used;
+
+    int order;
+    for(order = MIN_ORDER; order <= MAX_ORDER; order *= 10)
+    {
+        float* mat1 = (float*) malloc(order*order*sizeof(float));
+        float* mat2 = (float*) malloc(order*order*sizeof(float));
+        float* result = (float*) malloc(order*order*sizeof(float));
+
+        if(rank == 0)
+        {
+            for(int i = 0; i < order; i++)
+            {
+                for(int j = 0; j < order; j++)
+                {
+                    mat1[i*order+j] = rand() % 10;
+                    mat2[i*order+j] = rand() % 10;
+                }
+            }
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        start = clock();
+
+        MPI_Bcast(mat1, order*order, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(mat2, order*order, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+        int chunk_size = order / size;
+        float* local_mat1 = (float*) malloc(chunk_size*order*sizeof(float));
+        float* local_mat2 = (float*) malloc(chunk_size*order*sizeof(float));
+        float* local_result = (float*) malloc(chunk_size*order*sizeof(float));
+
+        MPI_Scatter(mat1, chunk_size*order, MPI_FLOAT, local_mat1, chunk_size*order, MPI_FLOAT, 0, MPI_COMM_WORLD);
+        MPI_Scatter(mat2, chunk_size*order, MPI_FLOAT, local_mat2, chunk_size*order, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+        matmul(local_mat1, local_mat2, local_result, chunk_size);
+
+        MPI_Gather(local_result, chunk_size*order, MPI_FLOAT, result, chunk_size*order, MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        end = clock();
+
+        cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+        if(rank == 0)
+        {
+            printf("Time taken for %d x %d matrix: %f seconds\n", order, order, cpu_time_used);
+        }
+
+        free(mat1);
+        free(mat2);
+        free(result);
+        free(local_mat1);
+        free(local_mat2);
+        free(local_result);
+    }
+
+    MPI_Finalize();
+    return 0;
+}
